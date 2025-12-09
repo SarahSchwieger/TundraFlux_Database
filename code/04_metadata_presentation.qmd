@@ -1,0 +1,797 @@
+---
+title: "TundraFlux Database (v1)"
+output: html_document
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+```{r Libraries, include=FALSE}
+library(renv)
+# Restore environment
+renv::restore()
+
+library(pacman)
+# Use pacman::p_load for clean, condensed loading of all packages
+pacman::p_load(
+    tidyverse,    # Includes ggplot2, dplyr, tidyr, readr
+    readxl,       # For reading Excel files
+    maps,         # For world maps
+    countrycode,  # For country codes
+    khroma,       # Custom color palettes (e.g., batlow)
+    giscoR,       # Geographic data (e.g., world map)
+    patchwork,    # For combining complex plots
+    sf,           # Simple features (spatial data)
+    cowplot,      # For combining plots (alternative to patchwork, used in Fig 1B-D)
+    kableExtra,   # For enhanced Markdown tables
+    gt,           # For beautiful tables
+    glue,         # String interpolation
+    raster,       # Spatial data handling
+    devtools,     # Package development tools
+    lubridate,    # Date/time manipulation
+    scico,        # Scientific color palettes
+    gtools,       # Useful R functions (e.g., mixedsort, though not explicitly used here)
+    scales        # For scale formatting in ggplot
+)
+
+cat("---- SESSION INFORMATION ----\n")
+print(sessionInfo())
+cat("-----------------------------\n")
+
+```
+
+# Abstract
+
+Empirical, *in-situ* measurements of ecosystem carbon dioxide
+respiration (Reco) remain scarce, yet they are essential for
+understanding how tundra carbon cycling responds to climate warming
+across environmental contexts and for reducing uncertainties in upscaled
+carbon budgets and carbon–climate feedbacks. Here, we present the
+TundraFlux Database, the most comprehensive synthesis of tundra Reco
+responses to experimental warming. It compiles over 24,000
+daily-aggregated *in-situ* Reco measurements from open-top chamber (OTC)
+warming and control plots at 64 Arctic and alpine tundra sites across 12
+countries. By coupling Reco measurements with extensive metadata on
+climate, vegetation, and soil characteristics, the TundraFlux Database
+bridges ecological processes and large-scale modeling, offering new
+opportunities to refine global carbon budgets and test predictions of
+tundra ecosystem responses to warming. Open access to the TundraFlux
+Database empowers the research community to better quantify and predict
+how warming alters carbon cycling in Arctic and alpine tundra
+ecosystems.
+
+# 1 Introduction
+
+The TundraFlux Database currently includes 24,951 daily averaged Reco
+observations, standardized to daily values (using daily averages
+whenever multiple measurements were made within the same day) from
+open-top chamber (OTC) warming experiments and associated control plots
+across 64 Arctic and alpine tundra sites (Fig. 1A) conducted between
+2000 and 2024 (Fig. 1B).
+
+```{r load in database, include=FALSE}
+flux_db <- readRDS("data/Tundra_Flux_daily.rds")
+
+# Calculate a summary dataset for reporting/internal checks
+datasets_summary <- flux_db %>%
+  group_by(site_id, flux_year, plot_id, treatment) %>%
+  summarise(
+    mean_reco = mean(reco, na.rm = TRUE),
+    sd_reco = sd(reco, na.rm = TRUE),
+    n_obs = n(),
+    .groups = "drop"
+  )
+# summary(flux_db) 
+```
+
+### *Figure 1A: Map of Locations*
+
+```{r map}
+#| label: fig-1a
+#| fig-width: 10
+#| fig-height: 8
+#| out-width: "90%"
+#| fig-align: center
+#| fig-cap: "Figure 1A: Map of the locations of the Reco measurements. Points are colored by site_id. The inset map (bottom left) displays the site in Tasmania, Australia, using a separate geographic projection."
+
+# 1. Prepare Site Data
+site_locations <- flux_db %>%
+  distinct(latitude, longitude, site_id, country, country_code)
+
+site_locations_nb_yr <- flux_db %>%
+  distinct(site_id, flux_year) %>%
+  count(site_id, name = "n_flux_years")
+
+sites_sf <- st_as_sf(site_locations, coords = c("longitude", "latitude"), crs = 4326) %>%
+  left_join(site_locations_nb_yr, by = "site_id")
+
+# 2. Prepare Map Data and Projections
+world <- gisco_get_countries(resolution = 10)
+world_arctic <- st_transform(world, crs = 3995) # North Polar Stereographic
+sites_arctic <- st_transform(sites_sf, crs = 3995)
+
+# 3. Plot Circumpolar Map (Main Plot)
+Reco_loc <- ggplot() +
+  geom_sf(data = world_arctic, fill = "gray90", alpha = 0.5) +
+  geom_sf(data = sites_arctic, aes(color = site_id), size = 3, alpha = 0.8) +
+  scale_color_batlow(discrete = TRUE, reverse = FALSE, name = "Site ID") +
+  coord_sf(
+    crs = st_crs(3995),
+    ylim = c(-5500000, 4000000),
+    xlim = c(-4000000, 6500000),
+    expand = FALSE
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text = element_blank(),
+    plot.margin = margin(r = 1, l = 1, unit = "cm")
+  )
+
+# 4. Create Australia Inset Map
+world_australia <- world %>% filter(CNTR_ID == "AU")
+sites_australia <- sites_sf %>% filter(country_code == "AUS")
+
+australia_inset_map <- ggplot() +
+  geom_sf(data = world_australia, fill = "gray90", alpha = 0.5) +
+  geom_sf(data = sites_australia, aes(color = site_id), size = 4, alpha = 0.9) +
+  scale_color_batlow(discrete = TRUE, reverse = FALSE) +
+  coord_sf(
+    crs = 4326, # WGS84
+    xlim = c(108, 155),
+    ylim = c(-45, -9),
+    expand = FALSE
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text = element_blank(),
+    plot.margin = margin(r = 0.1, l = 0.1, unit = "cm"),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 1)
+  )
+
+# 5. Combine Main Plot and Inset
+combined_plot <- Reco_loc +
+  inset_element(
+    australia_inset_map,
+    left = -0.05,  # Slightly outside the main panel for good contrast
+    bottom = -0.05,
+    right = 0.35,
+    top = 0.4
+  )
+
+print(combined_plot)
+```
+
+### *Figure 1B-D: Data Overview Histograms*
+
+```{r Figure 1 - B-D Data overview}
+#| label: fig-1b_d
+#| fig-width: 10
+#| fig-height: 8
+#| fig-align: center
+#| fig-cap: "Figure 1B-D: Histograms illustrating the temporal coverage of the TundraFlux database. (B) Year of Reco measurements. (C) Duration of Reco measurements (in years). (D) Day of Year (DOY) of Reco measurements, with shading indicating approximate shoulder (grey) and winter (light blue) periods."
+
+# Calculate duration first
+flux_db$duration_numeric <- flux_db$flux_year - flux_db$flux_measurement_start_year
+
+# (B) Reco Year
+panel1B <- ggplot(flux_db, aes(x = flux_year)) +
+  geom_histogram(binwidth = 1, fill = "#1C5360", color = "darkgrey") +
+  scale_x_continuous(breaks = seq(min(flux_db$flux_year, na.rm = TRUE),
+                                  max(flux_db$flux_year, na.rm = TRUE), by = 2)) +
+  labs(x = "Year of Reco measurements", y = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 12, angle = 70, hjust = 0.25, vjust = 0.5),
+        axis.text.y = element_text(size = 12),
+        panel.grid = element_blank())
+
+# (C) Duration (Years)
+panel1C <- ggplot(flux_db, aes(x = duration_numeric)) +
+  geom_histogram(binwidth = 1, fill = "#3E6C54", color = "darkgrey") +
+  scale_x_continuous(breaks = seq(min(flux_db$duration_numeric, na.rm = TRUE),
+                                  max(flux_db$duration_numeric, na.rm = TRUE), by = 2)) +
+  labs(x = "Duration of Reco measurements (years)", y = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        panel.grid = element_blank())
+
+# (D) Day of Year (DOY)
+panel1D <- ggplot(flux_db, aes(x = as.numeric(flux_doy))) +
+  # Winter Shading: Dec (335-365) + Jan, Feb, Mar (0-91)
+  annotate("rect", xmin = 0, xmax = 91, ymin = 0, ymax = Inf, fill = "lightblue", alpha = 0.2) +
+  annotate("rect", xmin = 335, xmax = 365, ymin = 0, ymax = Inf, fill = "lightblue", alpha = 0.2) +
+  # Shoulder Shading: Oct, Nov (274-335) + Apr, May (91-151)
+  annotate("rect", xmin = 274, xmax = 335, ymin = 0, ymax = Inf, fill = "grey", alpha = 0.2) +
+  annotate("rect", xmin = 91, xmax = 151, ymin = 0, ymax = Inf, fill = "grey", alpha = 0.2) +
+  geom_histogram(binwidth = 10, fill = "#0D355E", color = "darkgrey") +
+  scale_x_continuous(breaks = seq(0, 365, by = 30)) +
+  labs(x = "DOY of Reco measurements", y = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        panel.grid = element_blank())
+
+# Combine and label the y-axis manually using cowplot
+combined_panels <- plot_grid(
+  panel1B, panel1C, panel1D,
+  ncol = 1,
+  align = "v",
+  axis = "l"
+)
+
+combined_panels <- ggdraw(combined_panels) +
+  draw_label("Count", x = 0.02, y = 0.5, angle = 90, size = 14)
+
+print(combined_panels)
+```
+
+### *Figure 1E: Reco Boxplot*
+
+Boxplot of daily averaged Reco (g C–CO₂ m⁻² d⁻¹) per site. Boxes show
+the median and interquartile range (**IQR,** 25th–75th percentiles);
+whiskers extend to 1.5 × IQR, and values beyond the whiskers are plotted
+as outliers. The database includes occasional negative and exact-zero
+R~eco~ values. Negative values can result from instrument noise or brief
+net CO₂ uptake, while exact zeros may reflect contributor preprocessing
+(e.g., rounding or thresholding small fluxes). Both are retained to
+preserve original measurements; users may apply their preferred
+filtering criteria.
+
+```{r Figure 1E - Boxplot data overview}
+#| label: fig-1e
+#| fig-cap: "Figure 1E: Boxplot of daily aggregated Ecosystem Respiration (Reco) values per site (g C-CO₂ m⁻² d⁻¹)."
+#| fig-width: 12
+#| fig-height: 6
+#| fig-align: center
+
+# Ensure site_id is ordered alphabetically
+flux_db$site_id <- factor(flux_db$site_id, levels = sort(unique(flux_db$site_id)))
+
+boxplot_plot <- ggplot(flux_db, aes(x = site_id, y = reco, fill = site_id)) +
+  geom_boxplot(alpha = 0.8, outlier.size = 0.5) +
+  # Limits adjusted to better display typical Reco range, outliers will be outside
+  scale_y_continuous(limits = c(0, 32)) +
+  labs(
+    x = "Site ID",
+    y = expression(Reco ~ (g ~ C-CO[2] ~ m^{-2} ~ d^{-1}))
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 10),
+    legend.position = "none"
+  ) +
+  scale_fill_batlow(discrete = TRUE)
+
+print(boxplot_plot)
+```
+
+### *Figure 2: Data Structure*
+
+![short alt text](figures/fig_2A_database_scheme.png){width="60%"
+caption="Figure 2: Data structure of the TundraFlux Database. Boxes represent the main data types: (1) Carbon flux data, including plot-level daily averages of ecosystem CO₂ respiration (Reco) in g C-CO₂ m⁻² d⁻¹ and data measured along with flux measurements; (2) metadata, including information on (a) geolocation and climate at site level, (b) vegetation cover and plant traits at plot-level, and (c) soil properties at plot level; (3) Method data including documentation of experimental setups; and (4) Contact details. Variables listed inside the boxes correspond to column names in the database (identical to Table 1)."}
+
+### *Table 1: Data Completeness*
+
+```{r Figure 2B - Metadata compeleteness}
+#| label: fig-2b
+#| fig-cap: "Figure 2B: Percentage of available observations for selected metadata variables, grouped into three categories: (a) Geolocation and climate, (b) Vegetation cover and plant traits, and (c) Soil properties."
+#| fig-width: 12
+#| fig-height: 6
+#| dpi: 300
+#| fig-align: center
+
+# 1. Define Variables by Category
+flux_vars <- c("reco", "par", "air_temperature", "soil_temperature", "soil_moisture", "water_table", "thaw_depth")
+site_vars <- c("mean_annual_temperature", "mean_annual_precipitation", "active_layer_depth", "parent_material", "vegetation_type")
+vegetation_vars <- c("total_vascular_plant_cover", "deciduous_shrubs_cover", "evergreen_shrubs_cover", "forbs_cover", "graminoids_cover", "lichen_cover", "mosses_cover", "vegetation_method", "plant_height", "plant_height_method", "biomass", "biomass_method")
+soil_vars <- c("organic_layer_depth", "bulk_density_organic", "bulk_density_mineral", "bulk_density_mixture", "c_n_organic", "c_n_mineral", "soc_organic", "soc_mineral", "soc_mixture", "son_organic", "son_mineral", "son_mixture", "som_organic", "som_mineral", "som_mixture", "ph_h2o_organic", "ph_h2o_mineral", "ph_h2o_mixture", "soil_moisture_plot")
+
+# 2. Calculate Completeness
+completeness <- flux_db %>%
+  # Select only the target columns
+  dplyr::select(all_of(c(flux_vars, site_vars, vegetation_vars, soil_vars))) %>%
+  # Calculate completeness percentage (across all rows)
+  summarise(across(everything(), ~mean(!is.na(.)) * 100)) %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "percent_available") %>%
+  mutate(percent_available = round(percent_available, 0)) %>%
+  # Assign category for faceting
+  mutate(category = case_when(
+    variable %in% flux_vars ~ "1. Carbon Flux Data",
+    variable %in% site_vars ~ "2a. Site Metadata",
+    variable %in% vegetation_vars ~ "2b. Vegetation Cover & Plant Traits",
+    variable %in% soil_vars ~ "2c. Soil Properties"
+  )) %>%
+  # Clean up variable names for plot readability
+  mutate(variable = gsub("_", " ", variable))
+
+# 3. Plot with Facets
+completeness %>%
+  ggplot(aes(x = percent_available,
+             y = reorder(variable, percent_available),
+             fill = category)) +
+  geom_col() +
+  geom_text(aes(
+    label = paste0(round(percent_available, 0), "%"),
+    hjust = ifelse(percent_available < 20, -0.05, 1.05),
+    color = ifelse(percent_available < 20, "black", "white")
+  ), size = 3) +
+  scale_x_continuous(labels = scales::percent_format(scale = 1), limits = c(0, 110)) +
+  labs(x = "Percentage of available data", y = "") +
+  facet_wrap(~category, nrow = 1, scales = "free_y") +
+  scale_fill_manual(values = c(
+    "1. Carbon Flux Data" = "#0D355E",
+    "2a. Site Metadata" = "#1C5360",
+    "2b. Vegetation Cover & Plant Traits" = "#3E6C54",
+    "2c. Soil Properties" = "#D49347"
+  )) +
+  scale_color_identity() + # Use defined colors for geom_text
+  theme_minimal(base_size = 13) +
+  theme(
+    panel.grid = element_blank(),
+    legend.position = "none",
+    strip.text = element_text(hjust = 0, size = 12, face = "bold")
+  )
+```
+
+# 2 Description and structure
+
+### *Table S3: Data Dictionary*
+
+*1. Carbon Flux Data (plot-level)*
+
+| Variable | Description | Unit | Data type |
+|------------------|------------------|------------------|------------------|
+| `site_id` | Unique identifier for each site | – | factor |
+| `flux_date` | Date of flux measurement | YYYY-MM-DD | date |
+| `flux_year` | Year of flux measurement | year | integer |
+| `flux_doy` | Day of year | – | integer |
+| `reco` | Ecosystem respiration (daily aggregated) | g C-CO₂ m⁻² d⁻¹ | numeric |
+| `treatment` | Experimental treatment (OTC, control) | – | factor |
+| `plot_id` | Identifier for plot within a site | – | character |
+| `par` | Photosynthetically active radiation | µmol m⁻² s⁻¹ | numeric |
+| `air_temperature` | Air temperature | °C | numeric |
+| `soil_temperature` | Soil temperature (0–10 cm) | °C | numeric |
+| `soil_moisture` | Soil moisture (0–10 cm) | \% | numeric |
+| `water_table` | Water table depth | cm | numeric |
+| `thaw_depth` | Maximum thaw depth | cm | numeric |
+
+*2. Metadata*
+
+*2a. Site Metadata (site-level)*
+
+| Variable | Description | Unit | Data type |
+|------------------|------------------|------------------|------------------|
+| `site_name` | Full site name | – | character |
+| `country` | Country | – | character |
+| `country_code` | Country code | – | factor |
+| `latitude` | Latitude (decimal degrees) | ° | numeric |
+| `longitude` | Longitude (decimal degrees) | ° | numeric |
+| `altitude` | Elevation | m | numeric |
+| `mean_annual_temperature` | Mean annual temperature | °C | numeric |
+| `mean_annual_precipitation` | Mean annual precipitation | mm yr⁻¹ | numeric |
+| `active_layer_depth` | Active layer thickness | cm | numeric |
+| `parent_material` | Soil parent material | – | factor |
+| `vegetation_type` | Vegetation type (Walker et al. 2005); https://doi.org/10.1111/j.1654-1103.2005.tb02365.x | – | factor |
+| `PI_contact` | Principal investigator | – | character |
+| `add_contact` | Additional contributors | – | character |
+
+*2b. Vegetation Cover and Plant Traits (plot-level)*
+
+| Variable | Description | Unit | Data type |
+|------------------|------------------|------------------|------------------|
+| `vascular_plant_cover` | Vascular plant cover | \% | numeric |
+| `deciduous_shrubs_cover` | Deciduous shrub cover | \% | numeric |
+| `evergreen_shrubs_cover` | Evergreen shrub cover | \% | numeric |
+| `forbs_cover` | Forb cover | \% | numeric |
+| `graminoids_cover` | Graminoid cover | \% | numeric |
+| `lichen_cover` | Lichen cover | \% | numeric |
+| `mosses_cover` | Moss cover | \% | numeric |
+| `vegetation_method` | Cover estimation method | – | factor |
+| `plant_height` | Mean plant height | cm | numeric |
+| `plant_height_method` | Height measurement method | – | factor |
+| `biomass` | Aboveground biomass | g m⁻² | numeric |
+| `biomass_method` | Biomass method (calculated or harvested) | – | factor |
+
+*2c. Soil Properties (plot-level)*
+
+| Variable | Description | Unit | Data type |
+|------------------|------------------|------------------|------------------|
+| `organic_layer_depth` | Depth of organic soil layer | cm | numeric |
+| `bulk_density_organic` | Bulk density (organic soil) | g dwt cm⁻³ | numeric |
+| `bulk_density_mineral` | Bulk density (mineral soil) | g dwt cm⁻³ | numeric |
+| `bulk_density_mixture` | Bulk density (mixed soil) | g dwt cm⁻³ | numeric |
+| `c_n_organic` | C:N ratio (organic soil) | – | numeric |
+| `c_n_mineral` | C:N ratio (mineral soil) | – | numeric |
+| `soc_organic` | Soil organic carbon (organic layer) | g C kg⁻¹ soil | numeric |
+| `soc_mineral` | Soil organic carbon (mineral layer) | g C kg⁻¹ soil | numeric |
+| `soc_mixture` | Soil organic carbon (mixed soil) | g C kg⁻¹ soil | numeric |
+| `son_organic` | Soil organic nitrogen (organic layer) | g N kg⁻¹ soil | numeric |
+| `son_mineral` | Soil organic nitrogen (mineral layer) | g N kg⁻¹ soil | numeric |
+| `son_mixture` | Soil organic nitrogen (mixed soil) | g N kg⁻¹ soil | numeric |
+| `som_organic` | Soil organic matter (organic layer) | \% | numeric |
+| `som_mineral` | Soil organic matter (mineral layer) | \% | numeric |
+| `som_mixture` | Soil organic matter (mixed soil) | \% | numeric |
+| `ph_h2o_organic` | Soil pH (organic layer) | – | numeric |
+| `ph_h2o_mineral` | Soil pH (mineral layer) | – | numeric |
+| `ph_h2o_mixture` | Soil pH (mixed soil) | – | numeric |
+| `soil_moisture_plot` | Soil moisture (plot level) | \% | numeric |
+| `soil_moisture_plot_type` | Soil moisture type (gravimetric / volumetric) | – | factor |
+
+*3. Method Metadata (site-level)*
+
+| Variable | Description | Unit | Data type |
+|------------------|------------------|------------------|------------------|
+| `measurement_method` | Flux method (automated chamber, static, dynamic) | – | character |
+| `machine` | Measurement instrument | – | character |
+| `machine_type` | Sensor type | – | character |
+| `flux_measurement_start_year` | First measurement year | year | integer |
+| `warming_start_year` | Start year of warming (OTC) | year | integer |
+| `plot_size` | Full plot size | m² | numeric |
+| `flux_plot_size` | Size of flux subplot | m² | numeric |
+| `otc_height` | OTC height | cm | numeric |
+| `chamber_temperature` | Chamber temperature during measurement | °C | numeric |
+
+### 2.4 Data Standardization and Quality Control
+
+#### 2.4.1 Outlier detection and handling
+
+The R code uses a robust **Median Absolute Deviation (MAD)** method for
+outlier detection, which is appropriate for skewed ecological data. This
+code is shortened here. A complete version, `03_outlier_removal.R`, can
+be found in the accompanying code repository.
+
+```{r Outlier detection and removal}
+#| eval: true
+#| include: true
+#| echo: true
+
+# Load non-aggregated database file 
+flux_db_raw <- readRDS("data/Tundra_Flux_raw.rds")
+
+# 1. Setup
+n_before <- nrow(flux_db_raw)
+cat("Starting rows:", n_before, "\n")
+
+# 2. Apply robust MAD filtering per site-year
+# A threshold of |ModZ| > 2.5 is used to flag outliers.
+db_outl_removed <- flux_db_raw %>%
+  group_by(site_id, flux_year) %>%
+  mutate(
+    med_val = median(reco, na.rm = TRUE),
+    mad_val = mad(reco, constant = 1.4826, na.rm = TRUE),
+    # Calculate the Modified Z-score (Mod Z)
+    mod_z = 0.6745 * (reco - med_val) / mad_val,
+    # Flag outliers where |Mod Z| > 2.5
+    outlier_MAD = abs(mod_z) > 2.5,
+    # Set Reco to NA for flagged outliers
+    reco_clean = ifelse(outlier_MAD, NA, reco)
+  ) %>%
+  ungroup()
+
+# 3. Summary stats
+n_outliers <- sum(db_outl_removed$outlier_MAD, na.rm = TRUE)
+n_after <- n_before - n_outliers
+
+cat("Outliers removed:", n_outliers, "\n")
+cat("Rows remaining after outlier removal:", n_after, "\n")
+cat("Percentage removed:", round(n_outliers / n_before * 100, 2), "%\n")
+
+
+# 4. Visualization (only a small subset for example, can be adapted to see specific site_ids)
+ggplot(
+  db_outl_removed %>% filter(site_id %in% c("SWE_1", "GRE_6")), 
+  aes(x = reco, fill = outlier_MAD)
+) +
+  geom_histogram(bins = 30, position = "identity", alpha = 0.7) +
+  facet_wrap(~site_id, scales = "free") +
+  labs(
+    title = "Reco distributions with Outlier Flags (Example Sites)",
+    x = expression(Reco ~ (g ~ C-CO[2] ~ m^{-2} ~ d^{-1})),
+    y = "Count",
+    fill = "Flagged Outlier"
+  ) +
+  scale_fill_manual(values = c("FALSE" = "#687A3D", "TRUE" = "#D49347")) +
+  theme_minimal()
+
+```
+
+# 4 Current gaps and limitations
+
+## 4.1 Spatial coverage and bias
+
+This section quantifies the distribution of measurements across the
+different sites to assess potential spatial sampling bias.
+
+```{r measurements per site, echo=TRUE}
+# Count number of measurements per site
+site_summary <- flux_db %>%
+  group_by(site_id) %>%
+  summarise(n_measurements = n(), .groups = "drop")
+
+# Calculate key statistics
+median_measurements <- median(site_summary$n_measurements)
+iqr_measurements <- IQR(site_summary$n_measurements)
+
+# Identify the top contributing site
+top_site <- site_summary %>%
+  slice_max(n_measurements, n = 1, with_ties = FALSE) # Use with_ties=FALSE for a single site
+
+# Calculate contribution of top site
+total_all_sites <- sum(site_summary$n_measurements)
+top_site_percentage <- top_site$n_measurements / total_all_sites * 100
+
+# Print results
+cat("Median measurements per site:", median_measurements, "\n")
+cat("Interquartile range (IQR):", iqr_measurements, "\n")
+cat("Top site:", top_site$site_id, "with", top_site$n_measurements,
+    "measurements,", round(top_site_percentage, 1), "% of total\n")
+
+```
+
+### *Table 1 and Table S4: Observation Summary*
+
+The following code calculates the total number of daily observations
+(reco $\ne NA$) and the corresponding percentage contribution for each
+site within the TundraFlux Database.
+
+```{r Observations by region, eval=TRUE, results='asis'}
+#| label: tbl-1_s4
+#| tbl-cap: "Table S4: Observation Summary including total counts and percentage contribution by site and country."
+
+# 1. Calculate non-NA observations per day, site, and country
+counts <- flux_db %>%
+  filter(!is.na(reco)) %>%
+  distinct(site_id, flux_date, country, .keep_all = TRUE) %>% # Use distinct to ensure daily aggregation is respected
+  group_by(site_id, country) %>%
+  summarise(total_n_obs = n(), .groups = "drop") # Count the distinct days where Reco was measured
+
+# 2. Add Location Info and ISO Code
+site_locations <- flux_db %>%
+  distinct(site_id, country, latitude, longitude)
+
+observations_summary <- counts %>%
+  dplyr::left_join(site_locations, by = c("country", "site_id")) %>%
+  # Add ISO 3c code, manually correcting Svalbard
+  mutate(code = countrycode(country, origin = 'country.name', destination = 'iso3c')) %>%
+  mutate(code = ifelse(country == "Svalbard", "SJM", code)) %>%
+  # Calculate Percentage
+  mutate(perc = total_n_obs / sum(total_n_obs) * 100) %>%
+  # Clean up and arrange for presentation
+  dplyr::select(site_id, country, code, latitude, longitude, total_n_obs, perc) %>%
+  arrange(country, site_id)
+
+# 3. Print as HTML table using kableExtra
+observations_summary %>%
+  kable(
+    format = "html",
+    digits = 2,
+    col.names = c("Site ID", "Country", "ISO Code", "Latitude (°)", "Longitude (°)", "Total Observations (Days)", "Percentage (%)")
+  ) %>%
+  kable_styling(full_width = FALSE, position = "left")
+
+print(observations_summary)
+```
+
+## 4.2 Longer-term data
+
+```{r longer-term data}
+#| eval: true
+#| include: true
+
+#calculate duration 
+flux_db$duration_numeric <- (flux_db$flux_year) - (flux_db$flux_measurement_start_year)
+#plot
+panel1C<- ggplot(flux_db, aes(x = duration_numeric)) + # Reco on x-axis for histogram
+  geom_histogram(binwidth = 1, fill = "grey", color = "darkgrey") + # Adjust binwidth as needed
+    scale_x_continuous(breaks = seq(min(flux_db$duration_numeric, na.rm = TRUE),
+                                  max(flux_db$duration_numeric, na.rm = TRUE),
+                                  by = 2)) +
+  labs(
+    x = "Duration of Reco measurements (years)",
+    y = "",
+  ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(size = 12),
+      axis.text.y = element_text(size = 12),
+      panel.grid = element_blank()
+    )
+panel1C
+
+#calculate percentage of data 0-11 years and 12-24 years
+flux_db <- flux_db %>%
+  mutate(
+    duration_group = case_when(
+      duration_numeric >= 5 & duration_numeric <= 11 ~ "5-11",
+      duration_numeric >= 12 & duration_numeric <= 24 ~ "12-24",
+      duration_numeric >= 0 & duration_numeric <= 4 ~ "0-4",
+      TRUE ~ NA_character_  # For any value outside these ranges
+    )
+  )
+
+# Count observations per group
+group_counts <- flux_db %>%
+  filter(!is.na(duration_group)) %>%
+  count(duration_group) %>%
+  mutate(percentage = n / sum(n) * 100)
+
+group_counts
+```
+
+## 4.3 Shoulder and winter seasons respiration
+
+### *Figure 3: Temporal Coverage Heatmap*
+
+This heatmap visualizes the data availability across sites and months,
+highlighting the lack of shoulder/winter data.
+
+```{r Temporal Coverage Heatmap}
+#| label: fig-3
+#| fig-cap: "Figure 3: Monthly CO₂ flux data availability aggregated across all years. Color intensity is based on Log₁₀(Number of Observations + 1). White cells indicate zero observations. Shaded areas highlight shoulder (grey) and winter (light blue) seasons, illustrating data gaps."
+#| fig-width: 7
+#| fig-height: 10
+#| dpi: 800
+#| fig-align: center
+
+# 1. Prepare Data
+data_monthly_availability_transformed <- flux_db %>%
+  # Add Month Factor
+  mutate(flux_month = lubridate::month(flux_date, label = TRUE, abbr = TRUE)) %>%
+  # Count observations per site and month
+  group_by(site_id, flux_month) %>%
+  summarise(n_observations = n(), .groups = 'drop') %>%
+  # Fill in missing combinations with 0 observations
+  complete(site_id, flux_month, fill = list(n_observations = 0)) %>%
+  # Apply Log10 transformation for coloring (Log10(x+1))
+  mutate(
+    n_observations_for_fill = if_else(n_observations == 0, NA_real_, log10(n_observations + 1))
+  ) %>%
+  # Ensure site_id is factored alphabetically
+  mutate(site_id = factor(site_id, levels = sort(unique(site_id))))
+
+# 2. Define Custom Legend Breaks (for clarity)
+max_original_observations <- max(data_monthly_availability_transformed$n_observations)
+original_breaks <- c(1, 10, 100, 500, 1000, 5000)
+original_breaks <- original_breaks[original_breaks <= max_original_observations & original_breaks > 0]
+if (max_original_observations > max(original_breaks, 0)) {
+  original_breaks <- c(original_breaks, max_original_observations)
+}
+
+transformed_breaks <- log10(original_breaks + 1)
+labels_for_legend <- format(original_breaks, big.mark = ",", scientific = FALSE)
+
+# 3. Create Heatmap
+heatmap_plot <- ggplot(data_monthly_availability_transformed,
+                       aes(x = flux_month, y = site_id, fill = n_observations_for_fill)) +
+
+  geom_tile(color = "white", linewidth = 0.5) +
+
+  # Shading for Winter (Dec, Jan, Feb, Mar)
+  annotate("rect", xmin = 11.5, xmax = 12.5, ymin = -Inf, ymax = Inf, fill = "lightblue", alpha = 0.2) + # Dec
+  annotate("rect", xmin = 0.5, xmax = 3.5, ymin = -Inf, ymax = Inf, fill = "lightblue", alpha = 0.2) +  # Jan-Mar
+
+  # Shading for Shoulder (Apr, May and Oct, Nov)
+  annotate("rect", xmin = 3.5, xmax = 5.5, ymin = -Inf, ymax = Inf, fill = "grey", alpha = 0.2) +     # Apr-May
+  annotate("rect", xmin = 9.5, xmax = 11.5, ymin = -Inf, ymax = Inf, fill = "grey", alpha = 0.2) +    # Oct-Nov
+
+
+  scale_fill_scico(
+    palette = "batlow",
+    direction = -1,
+    name = expression(Log[10](Count + 1)),
+    breaks = transformed_breaks,
+    labels = labels_for_legend,
+    limits = range(data_monthly_availability_transformed$n_observations_for_fill, na.rm = TRUE),
+    na.value = "white" # Explicitly use white for 0 observations
+  ) +
+  labs(x = "Month", y = "Site ID") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    panel.grid = element_blank(),
+    legend.position = "right"
+  )
+
+print(heatmap_plot)
+```
+
+# Supplemental Material
+
+### *Table S2: Annual CO₂ Reco Summary*
+
+This table provides key statistical summaries of the daily ecosystem
+respiration measurements (reco) for each site and measurement year.
+
+```{r summarise data, eval=TRUE}
+#| label: tbl-s2
+#| tbl-cap: "Table S2: Annual CO₂ Reco Summary by Site and Year, including Median, Mean, Standard Deviation (SD), Minimum, Maximum, and total Number of Observations (N Obs.) in g C m⁻² d⁻¹."
+#| results: 'asis'
+# Note: Renamed from tbl-s12 to tbl-s2 as per typical documentation structure.
+
+# Ensure grouping variables are factors (for consistency, though not always required)
+flux_db$site_id <- as.factor(flux_db$site_id)
+flux_db$flux_year <- as.factor(flux_db$flux_year)
+
+# Calculate summary statistics
+summary_co2 <- flux_db %>%
+  group_by(site_id, flux_year) %>%
+  summarise(
+    Median_CO2_Reco = median(reco, na.rm = TRUE),
+    Mean_CO2_Reco = mean(reco, na.rm = TRUE),
+    SD_CO2_Reco = sd(reco, na.rm = TRUE),
+    Min_CO2_Reco = min(reco, na.rm = TRUE),
+    Max_CO2_Reco = max(reco, na.rm = TRUE),
+    N_Observations = n(),
+    .groups = 'drop'
+  ) %>%
+  arrange(site_id, flux_year) # Sort for presentation
+
+# Create the beautiful gt table
+summary_co2 %>%
+  gt() %>%
+    cols_label(
+    site_id = md("**Site ID**"),
+    flux_year = md("**Year**"),
+    Median_CO2_Reco = md("Median Reco"),
+    Mean_CO2_Reco = md("Mean Reco"),
+    SD_CO2_Reco = md("SD Reco"),
+    Min_CO2_Reco = md("Min Reco"),
+    Max_CO2_Reco = md("Max Reco"),
+    N_Observations = md("N Obs.")
+  ) %>%
+  # Apply unit notation to columns
+  tab_footnote(
+    footnote = md("Unit: g C-CO₂ m⁻² d⁻¹"),
+    locations = cells_column_labels(columns = c(Median_CO2_Reco, Mean_CO2_Reco, SD_CO2_Reco, Min_CO2_Reco, Max_CO2_Reco))
+  ) %>%
+  fmt_number(
+    columns = c(Median_CO2_Reco, Mean_CO2_Reco, SD_CO2_Reco, Min_CO2_Reco, Max_CO2_Reco),
+    decimals = 3
+  ) %>%
+  fmt_integer(
+    columns = N_Observations
+  ) %>%
+    tab_source_note(
+    source_note = "Data from TundraFlux Database."
+  )
+```
+
+### *Figure S1: Temporal Coverage by Site*
+
+This plot illustrates the exact years of Reco measurement availability
+for every site in the database, providing a detailed view of the
+long-term monitoring effort.
+
+```{r Figure S1}
+#| label: fig-s1
+#| fig-cap: "Figure S1: Temporal coverage of Reco measurements across all sites. Each point represents a day with recorded Reco data, illustrating the duration and continuity of measurements for each Site ID."
+#| fig-width: 8
+#| fig-height: 10
+#| fig-align: center
+
+# Order site_id alphabetically for consistent presentation
+flux_db$site_id <- factor(flux_db$site_id, levels = sort(unique(flux_db$site_id)))
+
+fig_s1 <- ggplot(data = flux_db, aes(x = flux_date, y = site_id, colour = site_id)) +
+  geom_point(size = 1) +
+  scale_x_date(
+    date_breaks = "2 years",
+    date_labels = "%Y",
+    expand = expansion(add = c(5, 5))
+  ) +
+  labs(
+    x = "Flux Year",
+    y = "Site ID"
+  ) +
+  guides(colour = "none") +
+  theme_minimal() +
+  scale_colour_batlow(discrete = TRUE) +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12)
+  )
+print(fig_s1)
+```
