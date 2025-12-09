@@ -16,11 +16,33 @@ In addition to the flux measurements, the database provides:
 
 ## Repository Structure
 
-TundraFlux_v1/ ├── data/ │ ├── Reco_microclimate_daily_v1.rds # Daily plot-level Reco and microclimate data │ ├── site_metadata_v1.rds # Site-level site metadata │ ├── plant_metadata_v1.rds # Plot-level vegetation metadata │ ├── soil_metadata_plot_v1.rds # Plot-level soil metadata │ ├── method_metadata_site_v1.rds # Site-level method metadata │ ├── TundraFlux_daily_v1.rds # All daily aggregated Reco data (combined) │ └── TundraFlux_raw_v1.rds # All raw flux-level data (individual observations) │ ├── documentation/ │ ├── data_dictionary.Rmd # Full variable descriptions (Authoritative reference) │ └── README.Rmd # Explanation of each data file (Source for this README) │ ├── code/ │ ├── 01_import_and_merge.R # Scripts for loading and merging data │ ├── 02_daily_aggregation.R # Script for daily aggregation │ ├── 03_outlier_removal.R # Script for outlier removal and filtering │ └── 04_metadata_presentation.qmd # Quarto document for presenting metadata │ └── supplementary/ ├── figures.zip
 
-└── tables_Schwieger_et_al.xlsx
+```{r}
+TundraFlux_v1/
+├── data/
+│   ├── Reco_microclimate_daily_v1.rds  # Plot-level Reco and microclimate datq
+│   ├── site_metadata_v1.rds            # Site-level site metadata
+│   ├── plant_metadata_v1.rds           # Plot-level vegetation metadata
+│   ├── soil_metadata_plot_v1.rds       # Plot-level soil metadata
+│   ├── method_metadata_site_v1.rds     # Site-level method metadata
+│   ├── TundraFlux_daily_v1.rds         # Daily aggregated Reco data (all sites combined)
+│   └── TundraFlux_raw_v1.rds           # Raw flux-level data (all individual Reco observations)
+│
+├── documentation/
+│   ├── data_dictionary.Rmd             # Full variable descriptions
+│   └── README.md                       # Explanation of each data file
+│
+├── code/
+│   ├── 01_import_and_merge.R
+│   ├── 02_daily_aggregation.R
+│   ├── 03_outlier_removal.R
+│   └── 04_metadata_presentation.qmd
+│
+└── supplementary/
+    ├── figures.zip 
+    └── tables_Schwieger_et_al.xlsx
 
----
+```
 
 ## Data Files
 
